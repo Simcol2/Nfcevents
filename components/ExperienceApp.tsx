@@ -422,6 +422,7 @@ function TriviaExperience({ experience, onBack }: { experience: Experience; onBa
   const [question, setQuestion] = useState<OpenedQuestion | null>(null);
   const [result, setResult] = useState<AnswerResult | null>(null);
   const [gone, setGone] = useState(false);
+  const [pickedCategory, setPickedCategory] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -477,6 +478,8 @@ function TriviaExperience({ experience, onBack }: { experience: Experience; onBa
       navigator.sendBeacon('/api/trivia/forfeit', new Blob([payload], { type: 'application/json' }));
       setQuestion(null);
       setGone(true);
+      // The revealed question already counts as seen on the server; refresh the counts.
+      void loadState();
     };
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') forfeit();
@@ -487,7 +490,7 @@ function TriviaExperience({ experience, onBack }: { experience: Experience; onBa
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', forfeit);
     };
-  }, [question, result]);
+  }, [question, result, loadState]);
 
   async function openTile(category: string, points: number) {
     if (busy) return;
@@ -511,6 +514,7 @@ function TriviaExperience({ experience, onBack }: { experience: Experience; onBa
       });
       setQuestion(q);
     } catch (e) {
+      setPickedCategory(null);
       setError(e instanceof Error ? e.message : 'Could not open that question.');
       void loadState();
     } finally {
@@ -541,6 +545,7 @@ function TriviaExperience({ experience, onBack }: { experience: Experience; onBa
   function backToBoard() {
     setQuestion(null);
     setResult(null);
+    setPickedCategory(null);
   }
 
   function leave() {
@@ -629,11 +634,47 @@ function TriviaExperience({ experience, onBack }: { experience: Experience; onBa
                     onChange={(e) => setName(e.target.value)}
                   />
                 )}
-                <p className="note">Pick a category and a point value. Questions are not timed, but leaving the screen during a question makes it disappear.</p>
-                <div className="board">
-                  {state.board.map((cat) => (
-                    <div className="boardRow" key={cat.key}>
-                      <div className="boardLabel">{cat.label}</div>
+                {state.player && state.player.answered > 0 && !pickedCategory && (
+                  <div className="status">Welcome back! Your score and progress are saved. Pick up where you left off.</div>
+                )}
+                {(() => {
+                  const cat = state.board.find((c) => c.key === pickedCategory);
+                  if (!cat) {
+                    return (
+                      <>
+                        <h3 className="stepTitle">Step 1 · Choose a category</h3>
+                        <div className="categoryList">
+                          {state.board.map((c) => {
+                            const left = c.tiles.reduce((n, t) => n + t.remaining, 0);
+                            return (
+                              <button
+                                key={c.key}
+                                className="categoryBtn"
+                                disabled={busy || left === 0}
+                                onClick={() => {
+                                  if (!state.player && !name.trim()) {
+                                    setError('Enter your name first.');
+                                    return;
+                                  }
+                                  setError('');
+                                  setGone(false);
+                                  setPickedCategory(c.key);
+                                }}
+                              >
+                                <strong>{c.label}</strong>
+                                <span>{left === 0 ? 'All done' : `${left} left`}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="tiny">Questions are not timed. Leaving the screen during a question makes that question disappear, but your score and progress are always saved.</p>
+                      </>
+                    );
+                  }
+                  const difficulty: Record<number, string> = { 1: 'Easy', 2: 'Medium', 5: 'Hard' };
+                  return (
+                    <>
+                      <h3 className="stepTitle">Step 2 · {cat.label}: choose a difficulty</h3>
                       <div className="boardTiles">
                         {cat.tiles.map((tile) => (
                           <button
@@ -641,16 +682,18 @@ function TriviaExperience({ experience, onBack }: { experience: Experience; onBa
                             className="tile"
                             disabled={busy || tile.remaining === 0}
                             onClick={() => openTile(cat.key, tile.points)}
-                            aria-label={`${cat.label}, ${tile.points} ${tile.points === 1 ? 'point' : 'points'}, ${tile.remaining} left`}
+                            aria-label={`${tile.points} ${tile.points === 1 ? 'point' : 'points'}, ${tile.remaining} left`}
                           >
-                            <strong>{tile.points}</strong>
+                            <strong>{tile.points} {tile.points === 1 ? 'pt' : 'pts'}</strong>
+                            <span>{difficulty[tile.points] ?? ''}</span>
                             <span>{tile.remaining === 0 ? 'done' : `${tile.remaining} left`}</span>
                           </button>
                         ))}
                       </div>
-                    </div>
-                  ))}
-                </div>
+                      <button className="secondary" onClick={() => setPickedCategory(null)}>← Choose a different category</button>
+                    </>
+                  );
+                })()}
               </>
             )}
             <Leaderboard state={state} final={status === 'closed'} />
