@@ -82,6 +82,8 @@ migrations/009_scenario_builder.sql
 migrations/010_chapman_heist_builder.sql
 migrations/011_trouble_crew_lock.sql
 migrations/012_trouble_crew_report.sql
+migrations/013_trouble_truth_or_dare.sql
+migrations/014_collaborative_trivia_relay.sql
 ```
 
 (`003_event_template.sql` is a template for new events, not part of the Chapman setup.)
@@ -368,6 +370,10 @@ For a family dinner this is usually enough. For high-value prizes, replace this 
 
 # Trivia board
 
+> Chapman's own **A Little Challenge** no longer uses this pick-your-own-tile board — it runs
+> the **collaborative trivia relay** described further down. This section documents the board
+> as a reusable mode for a future event that wants free choice instead of a shared relay.
+
 ## How the clock works
 
 Trivia settings live in the `config` column of the trivia experience:
@@ -420,6 +426,38 @@ Testing starts the clock. To reset trivia before the dinner, run in the SQL Edit
 delete from public.trivia_attempts;
 delete from public.trivia_players;
 ```
+
+---
+
+# Collaborative trivia relay
+
+Chapman's `A Little Challenge` runs this instead of the board above (`experiences.config.collaborative_relay = true`).
+
+1. **Lobby:** everyone who chose trivia appears. Any of them can tap *Start trivia* once at
+   least 2 people are in. Unlike Trouble, the crew is **not** frozen — a guest can join at any
+   point and immediately become choosable as the next hand-off.
+2. **One question live at a time.** The current player taps *Show me my question*, answers,
+   then picks **Play Nice** (an easier question, worth `relay_easy_points`, default 1) or
+   **Choose Violence** (a harder question, worth `relay_hard_points`, default 5) and hands it
+   to whoever they choose next. Everyone else watches live: who's up, and whether the last
+   answer was right.
+3. **Leaving the screen forfeits the open question** (0 points) — the same anti-cheat rule as
+   the board, so an answer can't be looked up elsewhere. It also **hands the turn to a random
+   other player automatically**, so one distracted guest can't stall the whole crew.
+4. **The clock** works like the board's: a shared countdown starts on the first answered
+   question and runs for `duration_minutes` (default 120). When it closes, the session shows
+   final standings.
+
+Easy pulls from the 1-point question tier, Violence from the 5-point tier — the 2-point tier
+isn't used by the relay. Both scoring and question selection read the same config values, so
+changing `relay_easy_points`/`relay_hard_points` only makes sense alongside adding questions at
+matching point values.
+
+**Heads up:** the relay picks questions at random from whichever category matches the point
+value, including the still-unreplaced \[PLACEHOLDER\] Chapman Family Stats questions (2 in the
+easy tier, 2 in the violence tier). On the old board a guest chose that category on purpose;
+here it can come up for anyone. Replace those 6 questions in `trivia_questions` before the
+dinner (see "Editing trivia questions" above).
 
 ---
 
@@ -621,9 +659,12 @@ Scenario experiences **without** `trouble_roles` still use the guided builder / 
 Testing starts both clocks. Before the real event, run in the SQL Editor:
 
 ```sql
--- Trivia: clears players, scores and in-progress questions.
+-- Trivia board (superseded for Chapman, but harmless to keep clearing):
 delete from public.trivia_attempts;
 delete from public.trivia_players;
+
+-- Collaborative trivia relay: cascades to its attempts.
+delete from public.trivia_relay_sessions;
 
 -- A Little Trouble: cascades to members, votes, roles, dares, truths, collabs.
 delete from public.trouble_sessions;

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getSupabaseBrowser } from '@/lib/supabase-browser';
 import ScenarioExperience from '@/components/ScenarioExperience';
+import TriviaRelay from '@/components/TriviaRelay';
 import type {
   Competition,
   CompetitionEntry,
@@ -236,6 +237,9 @@ function ExperienceScreen({
   onBack: () => void;
 }) {
   if (experience.mode === 'trivia') {
+    if (experience.config?.collaborative_relay === true) {
+      return <TriviaRelay eventId={data.event.id} experience={experience} onBack={onBack} />;
+    }
     return (
       <TriviaExperience experience={experience} onBack={onBack} />
     );
