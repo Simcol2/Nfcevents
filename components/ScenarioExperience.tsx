@@ -8,6 +8,7 @@ import type {
   ScenarioEntry,
   ScenarioField,
 } from '@/lib/types';
+import TroubleCrew from '@/components/TroubleCrew';
 
 function getDeviceToken() {
   const key = 'interactive-event-device-token';
@@ -53,7 +54,22 @@ function isComplete(field: ScenarioField, value: unknown) {
   return String(value ?? '').trim().length > 0;
 }
 
-export default function ScenarioExperience({
+export default function ScenarioExperience(props: {
+  eventId: string;
+  experience: Experience;
+  scenarios: Prompt[];
+  entries: ScenarioEntry[];
+  refresh: () => Promise<void>;
+  onBack: () => void;
+}) {
+  // Experiences configured with crew roles use the collaborative crew game.
+  if (Array.isArray(props.experience.config?.trouble_roles) && props.experience.config.trouble_roles.length > 0) {
+    return <TroubleCrew eventId={props.eventId} experience={props.experience} onBack={props.onBack} />;
+  }
+  return <SoloScenario {...props} />;
+}
+
+function SoloScenario({
   eventId,
   experience,
   scenarios,

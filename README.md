@@ -80,6 +80,7 @@ migrations/007_scenario_mode.sql
 migrations/008_chapman_trouble_scenarios.sql
 migrations/009_scenario_builder.sql
 migrations/010_chapman_heist_builder.sql
+migrations/011_trouble_crew_lock.sql
 ```
 
 (`003_event_template.sql` is a template for new events, not part of the Chapman setup.)
@@ -553,3 +554,46 @@ or a **police incident report**, saved with the entry so the host can read it al
 In Chapman, only the bank-robbery scenario has a builder (`010_chapman_heist_builder.sql`).
 That migration also switches A Little Trouble to `share`, so the other four scenarios offer
 a plan box. Set `scenario_outcome` back to `conversation` if you prefer talk-only for them.
+
+---
+
+# One experience per guest, and the Trouble crew
+
+## Category lock
+
+The home screen asks **What do you feel like tonight?** A guest picks one experience,
+enters their name and confirms. The server records that choice in `event_participants`
+(one row per device per event) and refuses any later attempt to pick a different one.
+If a guest refreshes or comes back later, the app asks the server and reopens their
+experience automatically.
+
+`event_participants` is readable by the browser for the live crew lobby, so it stores
+a SHA-256 **hash** of the device token, never the token itself.
+
+## A Little Trouble crew
+
+Experiences whose config has `trouble_roles` use the crew game:
+
+1. **Lobby:** everyone who chose Trouble appears. Anyone can tap *Everyone's here, lock the crew*
+   once `trouble_min_crew` (default 2) people are in.
+2. **Voting:** the host's mission (`trouble_prompt_id`) appears. Each person votes who best fits
+   each role, themselves included. When everyone has voted, the server assigns one role per person
+   to maximise the crew's total votes. Exact ties resolve by search order.
+3. **Planning:** each person gets their role's prompt and one constraint, and types or dictates
+   (browser voice-to-text where supported) their part.
+4. **Review:** once every part is in, a plain combined plan is built in role order. Everyone approves.
+5. **Submitted** after the last approval. Editing a part during review resets approvals.
+
+Crew size is capped at the number of roles (6 for Chapman). Once the crew is locked, or when it is
+full, new guests are told to choose another experience instead of joining a game that cannot
+include them.
+
+To change the mission, set `experiences.config.trouble_prompt_id` to another Trouble prompt.
+Scenario experiences **without** `trouble_roles` still use the guided builder / free-text flow.
+
+## Resetting before the real event
+
+```sql
+delete from public.trouble_sessions;      -- also clears votes, roles and plan pieces
+delete from public.event_participants;    -- unlocks every guest's category choice
+```

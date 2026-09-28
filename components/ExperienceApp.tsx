@@ -28,6 +28,8 @@ export default function ExperienceApp({ slug }: { slug: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [active, setActive] = useState<Experience | null>(null);
+  const [lockedId, setLockedId] = useState<string | null>(null);
+  const [lockChecked, setLockChecked] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -46,6 +48,31 @@ export default function ExperienceApp({ slug }: { slug: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // The server remembers which experience this device chose; reopen it on return.
+  const eventId = data?.event.id;
+  useEffect(() => {
+    if (!eventId || lockChecked) return;
+    setLockChecked(true);
+    void (async () => {
+      try {
+        const res = await fetch('/api/participation/status', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ eventId, deviceToken: getDeviceToken() }),
+          cache: 'no-store',
+        });
+        const json = await res.json();
+        const id = json?.participant?.experience_id as string | undefined;
+        if (!id) return;
+        setLockedId(id);
+        const exp = data?.experiences.find((x) => x.id === id);
+        if (exp) setActive(exp);
+      } catch {
+        // If the check fails the guest just sees the home screen; the server still enforces the lock.
+      }
+    })();
+  }, [eventId, lockChecked, data?.experiences]);
 
   useEffect(() => {
     if (!data) return;
@@ -88,7 +115,7 @@ export default function ExperienceApp({ slug }: { slug: string }) {
       </header>
 
       {!active ? (
-        <HomeScreen data={data} onPick={setActive} />
+        <HomeScreen data={data} lockedId={lockedId} onLocked={(exp) => { setLockedId(exp.id); setActive(exp); }} />
       ) : (
         <ExperienceScreen
           data={data}
@@ -101,14 +128,89 @@ export default function ExperienceApp({ slug }: { slug: string }) {
   );
 }
 
-function HomeScreen({ data, onPick }: { data: EventPayload; onPick: (exp: Experience) => void }) {
+function HomeScreen({
+  data,
+  lockedId,
+  onLocked,
+}: {
+  data: EventPayload;
+  lockedId: string | null;
+  onLocked: (exp: Experience) => void;
+}) {
+  const [pending, setPending] = useState<Experience | null>(null);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setName(window.localStorage.getItem(`event-name:${data.event.id}`) ?? '');
+  }, [data.event.id]);
+
+  async function lockChoice() {
+    if (!pending || !name.trim()) return;
+    setBusy(true);
+    setError('');
+    try {
+      const res = await fetch('/api/participation/lock', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ eventId: data.event.id, experienceId: pending.id, deviceToken: getDeviceToken(), displayName: name }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Could not lock your experience.');
+      window.localStorage.setItem(`event-name:${data.event.id}`, name.trim());
+      onLocked(pending);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not lock your experience.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const locked = lockedId ? data.experiences.find((x) => x.id === lockedId) ?? null : null;
+
+  // Already chosen: only their experience is open to them.
+  if (locked) {
+    return (
+      <section>
+        <h2 className="screenTitle">Your experience tonight</h2>
+        <p className="screenCopy">You&apos;re locked into {locked.title}. Tap it to jump back in.</p>
+        <div className="grid">
+          <button className="expCard" onClick={() => onLocked(locked)}>
+            <div>
+              <strong>{locked.title}</strong>
+              <span>{locked.description}</span>
+            </div>
+            <div className="arrow">›</div>
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  if (pending) {
+    return (
+      <section>
+        <button className="back" onClick={() => { setPending(null); setError(''); }}>← Change my mind</button>
+        <div className="panel">
+          <div className="category">{pending.title}</div>
+          <p className="prompt">You&apos;re choosing this experience for tonight.</p>
+          <p className="note">Enter your name to join. Once you confirm, you are locked into this experience and will play with the other guests who chose it.</p>
+          <input className="textInput" maxLength={60} placeholder="Your name" aria-label="Your name" value={name} onChange={(e) => setName(e.target.value)} />
+          <button className="primary" disabled={busy || !name.trim()} onClick={lockChoice}>{busy ? 'Joining…' : `Lock in ${pending.title}`}</button>
+          {error && <div className="error">{error}</div>}
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section>
-      <h2 className="screenTitle">Choose Your Experience</h2>
-      <p className="screenCopy">{data.event.intro ?? 'What are you in need of today?'}</p>
+      <h2 className="screenTitle">What do you feel like tonight?</h2>
+      <p className="screenCopy">{data.event.intro ?? 'Choose one. Your choice becomes your experience for the night.'}</p>
       <div className="grid">
         {data.experiences.map((exp) => (
-          <button className="expCard" key={exp.id} onClick={() => onPick(exp)}>
+          <button className="expCard" key={exp.id} onClick={() => setPending(exp)}>
             <div>
               <strong>{exp.title}</strong>
               <span>{exp.description}</span>
@@ -117,7 +219,7 @@ function HomeScreen({ data, onPick }: { data: EventPayload; onPick: (exp: Experi
           </button>
         ))}
       </div>
-      <p className="tiny">Tap whichever one suits you. You can always come back for another.</p>
+      <p className="tiny">Choose carefully. Once you join an experience, you stay with it for this event.</p>
     </section>
   );
 }
