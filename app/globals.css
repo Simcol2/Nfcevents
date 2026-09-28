@@ -173,3 +173,6 @@ button { touch-action: manipulation; }
 .scenarioVoteList { margin-top: 24px; }
 
 .crewList{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 22px}.crewChip{border-radius:999px;padding:9px 12px;background:color-mix(in srgb,var(--accent) 10%,white);border:1px solid color-mix(in srgb,var(--accent) 20%,transparent);font:700 .9rem Arial,sans-serif}.roleVoteCard{margin:20px 0;padding:18px;border-radius:18px;background:rgba(255,255,255,.72);border:1px solid rgba(65,50,35,.12);font-family:Arial,sans-serif}.roleVoteCard h3{margin:0 0 6px;font-size:1.05rem}.roleVoteCard p{margin:0 0 12px;color:var(--muted);line-height:1.45}.plainPlan{white-space:pre-wrap;font:.95rem/1.55 Arial,sans-serif;background:white;border:1px solid rgba(65,50,35,.12);border-radius:16px;padding:16px;overflow-x:auto}
+.crewReport { white-space: pre-wrap; font-size: 1rem; }
+.crewPlanDetails { margin-top: 16px; font-family: Arial, sans-serif; }
+.crewPlanDetails summary { cursor: pointer; color: var(--muted); padding: 8px 0; }

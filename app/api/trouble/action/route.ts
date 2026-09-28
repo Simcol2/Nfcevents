@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-server';
-import { assignRoles, buildPlainSummary, hashDeviceToken, parseRoles } from '@/lib/trouble';
+import { assignRoles, buildCrewReport, buildPlainSummary, hashDeviceToken, parseRoles } from '@/lib/trouble';
 
 export async function POST(request: Request){
   const body=await request.json().catch(()=>null); const {action,eventId,experienceId,deviceToken}=body??{};
@@ -79,7 +79,19 @@ export async function POST(request: Request){
       supabase.from('event_participants').select('*',{count:'exact',head:true}).eq('event_id',eventId).eq('experience_id',experienceId),
       supabase.from('trouble_plan_pieces').select('*',{count:'exact',head:true}).eq('session_id',session.id).eq('approved',true),
     ]);
-    if((memberCount??0)>0&&approvedCount===memberCount) await supabase.from('trouble_sessions').update({status:'submitted',submitted_at:new Date().toISOString()}).eq('id',session.id);
+    if((memberCount??0)>0&&approvedCount===memberCount){
+      // Everyone approved: generate the funny read-aloud version from the approved plan.
+      const [{data:members},{data:pieces},{data:prompt}]=await Promise.all([
+        supabase.from('event_participants').select('id,display_name').eq('event_id',eventId).eq('experience_id',experienceId),
+        supabase.from('trouble_plan_pieces').select('participant_id,role_key,contribution').eq('session_id',session.id),
+        supabase.from('prompts').select('body').eq('id',session.prompt_id).single(),
+      ]);
+      const roleMap=new Map(roles.map(r=>[r.key,r.label])); const memberMap=new Map((members??[]).map(m=>[m.id,m.display_name]));
+      const crew=[...(pieces??[])].sort((x,y)=>roles.findIndex(r=>r.key===x.role_key)-roles.findIndex(r=>r.key===y.role_key)).map(p=>({display_name:memberMap.get(p.participant_id)??'Crew member',role_label:roleMap.get(p.role_key)??p.role_key,contribution:p.contribution}));
+      const report=buildCrewReport({mission:prompt?.body??'Tonight’s mission',crew});
+      // Only the first request to finish the review writes the report.
+      await supabase.from('trouble_sessions').update({status:'submitted',submitted_at:new Date().toISOString(),report_style:report.style,report_text:report.text}).eq('id',session.id).eq('status','review');
+    }
     return NextResponse.json({ok:true,allApproved:approvedCount===memberCount});
   }
   return NextResponse.json({error:'Unknown action.'},{status:400});

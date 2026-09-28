@@ -81,6 +81,7 @@ migrations/008_chapman_trouble_scenarios.sql
 migrations/009_scenario_builder.sql
 migrations/010_chapman_heist_builder.sql
 migrations/011_trouble_crew_lock.sql
+migrations/012_trouble_crew_report.sql
 ```
 
 (`003_event_template.sql` is a template for new events, not part of the Chapman setup.)
@@ -583,6 +584,10 @@ Experiences whose config has `trouble_roles` use the crew game:
    (browser voice-to-text where supported) their part.
 4. **Review:** once every part is in, a plain combined plan is built in role order. Everyone approves.
 5. **Submitted** after the last approval. Editing a part during review resets approvals.
+6. **The funny version:** at that moment the server turns the approved plan into either a
+   **Breaking News** report or a **Police Incident Report** (chosen at random), quoting each
+   crew member's part. Every phone in the crew shows the same report to read aloud, with the
+   plain plan available underneath.
 
 Crew size is capped at the number of roles (6 for Chapman). Once the crew is locked, or when it is
 full, new guests are told to choose another experience instead of joining a game that cannot
