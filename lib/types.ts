@@ -23,6 +23,31 @@ export type Prompt = {
   experience_id: string;
   body: string;
   note: string | null;
+  builder?: ScenarioBuilder | null;
+};
+
+export type ScenarioRole = {
+  key: string;
+  label: string;
+  description?: string;
+  required?: boolean;
+};
+
+export type ScenarioField = {
+  key: string;
+  section?: string;
+  label: string;
+  type: 'text' | 'textarea' | 'date' | 'select' | 'multiselect';
+  help?: string;
+  placeholder?: string;
+  options?: string[];
+  required?: boolean;
+};
+
+export type ScenarioBuilder = {
+  title?: string;
+  roles?: ScenarioRole[];
+  fields?: ScenarioField[];
 };
 
 /** A revealed question as the guest sees it. The correct answer never leaves the server. */
@@ -91,6 +116,9 @@ export type ScenarioEntry = {
   prompt_id: string;
   group_name: string | null;
   plan: string;
+  answers: Record<string, unknown>;
+  summary_style: 'news' | 'police' | null;
+  summary_text: string | null;
   created_at: string;
   votes: number;
 };

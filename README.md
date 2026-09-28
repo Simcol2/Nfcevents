@@ -78,6 +78,8 @@ migrations/005_board_trivia.sql
 migrations/006_chapman_board_trivia.sql
 migrations/007_scenario_mode.sql
 migrations/008_chapman_trouble_scenarios.sql
+migrations/009_scenario_builder.sql
+migrations/010_chapman_heist_builder.sql
 ```
 
 (`003_event_template.sql` is a template for new events, not part of the Chapman setup.)
@@ -524,3 +526,30 @@ scenario_entry_results
 ```
 
 They use Supabase Realtime just like competitions, so submitted plans and votes update across guests' phones.
+
+---
+
+# Guided scenario builder (the bank heist)
+
+A scenario prompt can carry a `builder` (JSON in `prompts.builder`). When it does, the
+group is walked through the plan step by step instead of getting one big text box:
+
+1. Crew or table name (required; it appears in the final report)
+2. Assign roles (Mastermind, Driver, Lookout, Talker, Tech, Distraction). Leave a role
+   blank if nobody at the table can genuinely do it.
+3. One screen per planning question (date, transport, equipment, threat level,
+   bystanders, then the opening, inside and exit phases, and the aftermath)
+4. Review, then "Lock in our plan"
+
+On submission the server randomly turns the plan into either a **breaking-news report**
+or a **police incident report**, saved with the entry so the host can read it aloud.
+
+- The server only stores the roles and fields the builder defines, trims every answer,
+  and rejects the plan if a required step is missing.
+- Unfinished plans are saved on the phone, so a group can leave and pick up where it left off.
+- Scenarios **without** a builder keep the host's `scenario_outcome` setting
+  (conversation, share or vote) with a single free-text plan and no generated report.
+
+In Chapman, only the bank-robbery scenario has a builder (`010_chapman_heist_builder.sql`).
+That migration also switches A Little Trouble to `share`, so the other four scenarios offer
+a plan box. Set `scenario_outcome` back to `conversation` if you prefer talk-only for them.
