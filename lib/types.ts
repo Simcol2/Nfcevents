@@ -25,15 +25,43 @@ export type Prompt = {
   note: string | null;
 };
 
-export type TriviaQuestion = {
-  id: string;
-  experience_id: string;
+/** A revealed question as the guest sees it. The correct answer never leaves the server. */
+export type OpenedQuestion = {
+  attemptId: string;
+  category: string;
+  categoryLabel: string;
+  points: number;
   question: string;
   answers: string[];
-  correct_index: number;
-  time_limit_seconds: number;
-  points_base: number;
-  speed_bonus_per_second: number;
+};
+
+export type TriviaCategory = { key: string; label: string };
+
+export type TriviaConfig = {
+  categories: TriviaCategory[];
+  pointValues: number[];
+  durationMinutes: number;
+  hardEndAt: string | null;
+};
+
+export type TriviaWindow = {
+  status: 'waiting' | 'live' | 'closed';
+  startedAt: string | null;
+  closesAt: string | null;
+  durationMinutes: number;
+};
+
+export type LeaderRow = { name: string; points: number; answered: number; isYou: boolean };
+
+export type TriviaState = {
+  now: string;
+  window: TriviaWindow;
+  player: { name: string; points: number; answered: number } | null;
+  board: Array<{ key: string; label: string; tiles: Array<{ points: number; remaining: number }> }>;
+  leaderboard: {
+    overall: LeaderRow[];
+    categories: Array<{ key: string; label: string; leader: LeaderRow | null }>;
+  };
 };
 
 export type Competition = {
@@ -68,8 +96,6 @@ export type EventPayload = {
   };
   experiences: Experience[];
   prompts: Record<string, Prompt[]>;
-  trivia: Record<string, TriviaQuestion[]>;
   competitions: Record<string, Competition | null>;
   competitionEntries: Record<string, CompetitionEntry[]>;
-  leaderboard: Array<{ display_name: string; score: number; completed_at: string }>;
 };

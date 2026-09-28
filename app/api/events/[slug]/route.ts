@@ -28,11 +28,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
 
   const ids = (experiences ?? []).map((e) => e.id);
 
-  const [promptsRes, triviaRes, compsRes, scoresRes] = await Promise.all([
+  // Trivia questions are deliberately not sent here: they are revealed one at
+  // a time by /api/trivia/open, and correct answers never leave the server.
+  const [promptsRes, compsRes] = await Promise.all([
     ids.length ? supabase.from('prompts').select('*').in('experience_id', ids) : Promise.resolve({ data: [], error: null }),
-    ids.length ? supabase.from('trivia_questions').select('*').in('experience_id', ids) : Promise.resolve({ data: [], error: null }),
     ids.length ? supabase.from('competitions').select('*').in('experience_id', ids) : Promise.resolve({ data: [], error: null }),
-    supabase.from('trivia_scores').select('display_name,score,completed_at').eq('event_id', event.id).order('score', { ascending: false }).order('completed_at', { ascending: true }).limit(20),
   ]);
 
   const competitionIds = (compsRes.data ?? []).map((c) => c.id);
@@ -41,13 +41,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
     : { data: [], error: null };
 
   const prompts: Record<string, unknown[]> = {};
-  const trivia: Record<string, unknown[]> = {};
   const competitions: Record<string, unknown | null> = {};
   const competitionEntries: Record<string, unknown[]> = {};
 
   for (const exp of experiences ?? []) {
     prompts[exp.id] = (promptsRes.data ?? []).filter((p) => p.experience_id === exp.id);
-    trivia[exp.id] = (triviaRes.data ?? []).filter((q) => q.experience_id === exp.id);
     const comp = (compsRes.data ?? []).find((c) => c.experience_id === exp.id) ?? null;
     competitions[exp.id] = comp;
     competitionEntries[exp.id] = comp
@@ -59,9 +57,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
     event,
     experiences: experiences ?? [],
     prompts,
-    trivia,
     competitions,
     competitionEntries,
-    leaderboard: scoresRes.data ?? [],
   });
 }

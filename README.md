@@ -38,14 +38,19 @@ The event seed includes:
 
 Each pulls a random prompt from the database.
 
-### Live timed trivia
-A Little Challenge includes:
+### Jeopardy-style trivia board
+A Little Challenge works like a Jeopardy board:
 
-- timed questions
-- speed-based points
-- score submission to Supabase
-- a **real shared leaderboard**
-- Supabase Realtime refreshes when scores change
+- guests pick a **category** and a **point value** (1, 2 or 5)
+- questions are **not timed**; the whole activity is
+- a **2-hour countdown** starts when anyone answers the first question
+- guests keep playing until time runs out
+- inside each category/value, everyone gets the same questions in the same order
+- wrong answers score 0
+- leaving the screen during a question (switching apps, locking the phone, reloading) makes it **disappear** and score 0
+- the leaderboard shows the overall leader and each category's leader, then the **winners** once time is up
+
+See "Trivia board" below for how it is protected against cheating.
 
 ### Competition system
 A Little Competition supports either:
@@ -69,15 +74,18 @@ Run these files **in order**:
 migrations/001_schema.sql
 migrations/002_chapman_thanksgiving.sql
 migrations/004_view_security_invoker.sql
+migrations/005_board_trivia.sql
+migrations/006_chapman_board_trivia.sql
 ```
+
+(`003_event_template.sql` is a template for new events, not part of the Chapman setup.)
 
 `001_schema.sql` creates:
 
 - events
 - experiences
 - prompts
-- trivia questions
-- trivia scores
+- trivia questions (reshaped for the board by `005_board_trivia.sql`)
 - competitions
 - competition entries
 - competition votes
@@ -249,7 +257,10 @@ Thanksgiving/family memory prompts.
 Compliments and small social kindness prompts.
 
 ### A Little Challenge
-Five timed trivia questions with a live leaderboard.
+A trivia board with five categories: Chapman Family Stats, Thanksgiving Facts,
+General Knowledge, 5th Grade and 9th Grade. Each has 1, 2 and 5 point questions.
+
+**Chapman Family Stats are placeholders.** Replace them before the dinner (see "Editing trivia questions").
 
 ### A Little Trouble
 Low-stakes dares.
@@ -290,12 +301,13 @@ No frontend code changes are required.
 The browser subscribes to changes in:
 
 ```text
-trivia_scores
 competition_entries
 competition_votes
 ```
 
-When another guest submits a score, entry, or vote, open event pages reload the current shared event data.
+When another guest submits an entry or vote, open event pages reload the current shared event data.
+The trivia board refreshes its leaderboard every 15 seconds instead, because trivia tables are
+deliberately not readable from the browser.
 
 This means:
 
@@ -345,21 +357,60 @@ For a family dinner this is usually enough. For high-value prizes, replace this 
 
 ---
 
-# Before using prizes with real monetary value
+# Trivia board
 
-This starter is appropriate for a party prototype, but do not attach expensive prizes to client-side trivia scores without adding server-side verification.
+## How the clock works
 
-Currently the browser calculates the trivia score and submits the final score. A guest who deliberately manipulates requests could theoretically fake one.
+Trivia settings live in the `config` column of the trivia experience:
 
-For a future prize-bearing version, submit:
+```json
+{
+  "duration_minutes": 120,
+  "hard_end_at": null,
+  "point_values": [1, 2, 5],
+  "categories": [{ "key": "chapman", "label": "Chapman Family Stats" }]
+}
+```
 
-- question IDs
-- chosen answers
-- response times
+- The countdown starts the moment **anyone answers** their first question.
+- It lasts `duration_minutes`.
+- `hard_end_at` is an optional backstop, for example `"2026-10-11T21:00:00-04:00"`.
+  Trivia closes at whichever comes first.
 
-and calculate the final score in the server route.
+## Anti-cheat
 
-Similarly, for valuable prize competitions, add stronger identity/rate limiting than the anonymous device token.
+- Correct answers never leave the server. The browser never receives them, and the
+  public Supabase key cannot read the trivia tables.
+- Scores are calculated on the server. The browser cannot submit a score.
+- A question can only be revealed once per guest. Leaving the screen, reloading, or
+  opening another question forfeits it for 0 points.
+- After answering, guests only see "Correct" or "Not this time", not the right answer,
+  so answers are not passed around the table.
+
+Limits worth knowing: a guest could still use a second phone to look things up, or
+open trivia in a private browser tab (which counts as a new player) to preview the
+next question. For a family dinner this is a reasonable trade-off.
+
+## Editing trivia questions
+
+Edit rows in Supabase: **Table Editor → trivia_questions**.
+
+- `category`: one of `chapman`, `thanksgiving`, `general`, `grade5`, `grade9`
+- `points`: 1, 2 or 5
+- `sort_order`: the order questions are served in within that category/value
+- `answers`: a JSON list, for example `["A","B","C","D"]`
+- `correct_index`: position of the right answer, **starting at 0** (0 = first)
+
+Add more rows to any category/value to give guests more to play.
+
+## Resetting before the real event
+
+Testing starts the clock. To reset trivia before the dinner, run in the SQL Editor:
+
+```sql
+delete from public.trivia_attempts;
+delete from public.trivia_players;
+```
 
 ---
 

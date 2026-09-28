@@ -7,8 +7,9 @@ import type {
   CompetitionEntry,
   EventPayload,
   Experience,
+  OpenedQuestion,
   Prompt,
-  TriviaQuestion,
+  TriviaState,
 } from '@/lib/types';
 
 function getDeviceToken() {
@@ -50,7 +51,6 @@ export default function ExperienceApp({ slug }: { slug: string }) {
     const supabase = getSupabaseBrowser();
     const channel = supabase
       .channel(`event-${data.event.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'trivia_scores', filter: `event_id=eq.${data.event.id}` }, () => void load())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'competition_entries' }, () => void load())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'competition_votes' }, () => void load())
       .subscribe();
@@ -132,14 +132,7 @@ function ExperienceScreen({
 }) {
   if (experience.mode === 'trivia') {
     return (
-      <TriviaExperience
-        eventId={data.event.id}
-        experience={experience}
-        questions={data.trivia[experience.id] ?? []}
-        leaderboard={data.leaderboard}
-        refresh={refresh}
-        onBack={onBack}
-      />
+      <TriviaExperience experience={experience} onBack={onBack} />
     );
   }
 
@@ -194,100 +187,223 @@ function PromptExperience({ experience, prompts, onBack }: { experience: Experie
   );
 }
 
-function TriviaExperience({
-  eventId,
-  experience,
-  questions,
-  leaderboard,
-  refresh,
-  onBack,
-}: {
-  eventId: string;
-  experience: Experience;
-  questions: TriviaQuestion[];
-  leaderboard: EventPayload['leaderboard'];
-  refresh: () => Promise<void>;
-  onBack: () => void;
-}) {
+function getPlayerSecret() {
+  const key = 'interactive-event-trivia-secret';
+  let secret = window.localStorage.getItem(key);
+  if (!secret) {
+    secret = crypto.randomUUID();
+    window.localStorage.setItem(key, secret);
+  }
+  return secret;
+}
+
+function formatClock(ms: number) {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = total % 60;
+  return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+}
+
+async function postJson<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Something went wrong.');
+  return json as T;
+}
+
+type AnswerResult = { correct: boolean; pointsAwarded: number };
+
+function TriviaExperience({ experience, onBack }: { experience: Experience; onBack: () => void }) {
+  const [state, setState] = useState<TriviaState | null>(null);
+  const [clockOffset, setClockOffset] = useState(0);
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const [name, setName] = useState('');
-  const [started, setStarted] = useState(false);
-  const [finished, setFinished] = useState(false);
-  const [qIndex, setQIndex] = useState(0);
-  const [score, setScore] = useState(0);
-  const [seconds, setSeconds] = useState(0);
-  const [locked, setLocked] = useState(false);
-  const [chosen, setChosen] = useState<number | null>(null);
-  const [submitError, setSubmitError] = useState('');
+  const [question, setQuestion] = useState<OpenedQuestion | null>(null);
+  const [result, setResult] = useState<AnswerResult | null>(null);
+  const [gone, setGone] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
-  const question = questions[qIndex];
+  const loadState = useCallback(async (onLoad = false) => {
+    try {
+      const next = await postJson<TriviaState>('/api/trivia/state', {
+        experienceId: experience.id,
+        playerSecret: getPlayerSecret(),
+        onLoad,
+      });
+      setState(next);
+      setClockOffset(Date.parse(next.now) - Date.now());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load trivia.');
+    }
+  }, [experience.id]);
 
-  const advance = useCallback(() => {
-    if (qIndex + 1 >= questions.length) {
-      setFinished(true);
-      setStarted(false);
+  // First load forfeits anything left open (reload / came back later).
+  useEffect(() => {
+    setName(window.localStorage.getItem('interactive-event-trivia-name') ?? '');
+    void loadState(true);
+  }, [loadState]);
+
+  // Keep the leaderboard fresh while on the board.
+  useEffect(() => {
+    if (question) return;
+    const t = window.setInterval(() => void loadState(), 15000);
+    return () => window.clearInterval(t);
+  }, [question, loadState]);
+
+  useEffect(() => {
+    const t = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  const closesAtMs = state?.window.closesAt ? Date.parse(state.window.closesAt) : null;
+  const remainingMs = closesAtMs === null ? null : closesAtMs - (nowTick + clockOffset);
+  const status = state
+    ? state.window.status === 'live' && remainingMs !== null && remainingMs <= 0 ? 'closed' : state.window.status
+    : 'waiting';
+
+  // When the countdown hits zero, fetch the final results.
+  useEffect(() => {
+    if (state?.window.status === 'live' && status === 'closed') void loadState();
+  }, [status, state?.window.status, loadState]);
+
+  // Anti-cheat: leaving the screen while a question is showing makes it disappear.
+  useEffect(() => {
+    if (!question || result) return;
+    const attemptId = question.attemptId;
+    const forfeit = () => {
+      const payload = JSON.stringify({ attemptId, playerSecret: getPlayerSecret() });
+      navigator.sendBeacon('/api/trivia/forfeit', new Blob([payload], { type: 'application/json' }));
+      setQuestion(null);
+      setGone(true);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') forfeit();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', forfeit);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', forfeit);
+    };
+  }, [question, result]);
+
+  async function openTile(category: string, points: number) {
+    if (busy) return;
+    const trimmed = name.trim();
+    if (!state?.player && !trimmed) {
+      setError('Enter your name first.');
       return;
     }
-    setQIndex((x) => x + 1);
-    setChosen(null);
-    setLocked(false);
-  }, [qIndex, questions.length]);
-
-  useEffect(() => {
-    if (!started || !question || locked) return;
-    setSeconds(question.time_limit_seconds);
-    const timer = window.setInterval(() => {
-      setSeconds((s) => {
-        if (s <= 1) {
-          window.clearInterval(timer);
-          setLocked(true);
-          window.setTimeout(advance, 700);
-          return 0;
-        }
-        return s - 1;
+    setBusy(true);
+    setError('');
+    setGone(false);
+    setResult(null);
+    try {
+      if (trimmed) window.localStorage.setItem('interactive-event-trivia-name', trimmed);
+      const q = await postJson<OpenedQuestion>('/api/trivia/open', {
+        experienceId: experience.id,
+        playerSecret: getPlayerSecret(),
+        displayName: trimmed,
+        category,
+        points,
       });
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [started, qIndex, question?.id, locked, advance]);
-
-  useEffect(() => {
-    if (!finished) return;
-    const submit = async () => {
-      const res = await fetch('/api/trivia/score', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          eventId,
-          experienceId: experience.id,
-          displayName: name,
-          deviceToken: getDeviceToken(),
-          score,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) setSubmitError(json.error || 'Could not save score.');
-      else await refresh();
-    };
-    void submit();
-  }, [finished]); // intentional: submit once when game completes
-
-  function choose(answerIndex: number) {
-    if (locked || !question) return;
-    setChosen(answerIndex);
-    setLocked(true);
-    if (answerIndex === question.correct_index) {
-      setScore((s) => s + question.points_base + seconds * question.speed_bonus_per_second);
+      setQuestion(q);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not open that question.');
+      void loadState();
+    } finally {
+      setBusy(false);
     }
-    window.setTimeout(advance, 850);
   }
 
-  function start() {
-    if (!name.trim() || !questions.length) return;
-    setScore(0);
-    setQIndex(0);
-    setFinished(false);
-    setLocked(false);
-    setChosen(null);
-    setStarted(true);
+  async function answer(choice: number) {
+    if (!question || busy || result) return;
+    setBusy(true);
+    setError('');
+    try {
+      const r = await postJson<AnswerResult>('/api/trivia/answer', {
+        attemptId: question.attemptId,
+        playerSecret: getPlayerSecret(),
+        choice,
+      });
+      setResult(r);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not submit answer.');
+      setQuestion(null);
+    } finally {
+      setBusy(false);
+      void loadState();
+    }
+  }
+
+  function backToBoard() {
+    setQuestion(null);
+    setResult(null);
+  }
+
+  function leave() {
+    if (question && !result) {
+      const payload = JSON.stringify({ attemptId: question.attemptId, playerSecret: getPlayerSecret() });
+      navigator.sendBeacon('/api/trivia/forfeit', new Blob([payload], { type: 'application/json' }));
+    }
+    onBack();
+  }
+
+  const clock = (
+    <div className="triviaClock" role="timer" aria-live="off">
+      {status === 'waiting' && (
+        <>
+          <strong>{formatClock((state?.window.durationMinutes ?? 120) * 60000)}</strong>
+          <span>on the clock. It starts with the first answer.</span>
+        </>
+      )}
+      {status === 'live' && remainingMs !== null && (
+        <>
+          <strong>{formatClock(remainingMs)}</strong>
+          <span>remaining</span>
+        </>
+      )}
+      {status === 'closed' && (
+        <>
+          <strong>Time&apos;s up</strong>
+          <span>Final results below</span>
+        </>
+      )}
+    </div>
+  );
+
+  if (question) {
+    return (
+      <section>
+        <button className="back" onClick={leave}>← Leave (forfeits this question)</button>
+        <div className="panel">
+          <div className="category">{question.categoryLabel} • {question.points} {question.points === 1 ? 'point' : 'points'}</div>
+          <p className="prompt">{question.question}</p>
+          <div className="choices">
+            {question.answers.map((a, i) => (
+              <button key={`${i}-${a}`} className="choice" disabled={busy || !!result} onClick={() => answer(i)}>{a}</button>
+            ))}
+          </div>
+          {!result && <p className="tiny">Take your time. But if you leave this screen, the question disappears and scores zero.</p>}
+          {result && (
+            <>
+              <div className={result.correct ? 'status resultGood' : 'status resultBad'} role="status">
+                {result.correct ? `Correct! +${result.pointsAwarded}` : 'Not this time. 0 points.'}
+              </div>
+              <button className="primary" onClick={backToBoard}>Back to the board</button>
+            </>
+          )}
+          {error && <div className="error">{error}</div>}
+        </div>
+      </section>
+    );
   }
 
   return (
@@ -295,43 +411,54 @@ function TriviaExperience({
       <button className="back" onClick={onBack}>← Back to experiences</button>
       <div className="panel">
         <div className="category">{experience.title}</div>
+        {clock}
 
-        {!started && !finished && (
-          <>
-            <p className="prompt">{questions.length} questions. Timed.</p>
-            <p className="note">Your score joins the live dinner leaderboard.</p>
-            <input className="textInput" value={name} maxLength={32} placeholder="Your name" onChange={(e) => setName(e.target.value)} />
-            <button className="primary" disabled={!name.trim() || !questions.length} onClick={start}>Start challenge</button>
-          </>
-        )}
+        {gone && <div className="error">That question disappeared because you left the screen. It counts as zero.</div>}
+        {error && <div className="error">{error}</div>}
 
-        {started && question && (
+        {!state ? (
+          <p className="note">Loading the board…</p>
+        ) : (
           <>
-            <div className="timer">{seconds}</div>
-            <div className="progress"><div className="progressBar" style={{ width: `${Math.max(0, (seconds / question.time_limit_seconds) * 100)}%` }} /></div>
-            <p className="prompt" style={{ marginTop: 22 }}>{question.question}</p>
-            <div className="choices">
-              {question.answers.map((answer, i) => {
-                const cls = chosen === null
-                  ? 'choice'
-                  : i === question.correct_index
-                    ? 'choice correct'
-                    : i === chosen
-                      ? 'choice wrong'
-                      : 'choice';
-                return <button key={answer} className={cls} disabled={locked} onClick={() => choose(i)}>{answer}</button>;
-              })}
-            </div>
-            <div className="scoreMeta">Question {qIndex + 1} of {questions.length} • Score {score}</div>
-          </>
-        )}
-
-        {finished && (
-          <>
-            <p className="prompt">{name}, you scored {score}.</p>
-            {submitError && <div className="error">{submitError}</div>}
-            <Leaderboard rows={leaderboard} />
-            <button className="secondary" onClick={onBack}>Choose another experience</button>
+            {status !== 'closed' && (
+              <>
+                {state.player ? (
+                  <p className="note">Playing as <strong>{state.player.name}</strong> • {state.player.points} {state.player.points === 1 ? 'point' : 'points'}</p>
+                ) : (
+                  <input
+                    className="textInput"
+                    value={name}
+                    maxLength={32}
+                    placeholder="Your name for the leaderboard"
+                    aria-label="Your name for the leaderboard"
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                )}
+                <p className="note">Pick a category and a point value. Questions are not timed, but leaving the screen during a question makes it disappear.</p>
+                <div className="board">
+                  {state.board.map((cat) => (
+                    <div className="boardRow" key={cat.key}>
+                      <div className="boardLabel">{cat.label}</div>
+                      <div className="boardTiles">
+                        {cat.tiles.map((tile) => (
+                          <button
+                            key={tile.points}
+                            className="tile"
+                            disabled={busy || tile.remaining === 0}
+                            onClick={() => openTile(cat.key, tile.points)}
+                            aria-label={`${cat.label}, ${tile.points} ${tile.points === 1 ? 'point' : 'points'}, ${tile.remaining} left`}
+                          >
+                            <strong>{tile.points}</strong>
+                            <span>{tile.remaining === 0 ? 'done' : `${tile.remaining} left`}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            <Leaderboard state={state} final={status === 'closed'} />
           </>
         )}
       </div>
@@ -339,16 +466,35 @@ function TriviaExperience({
   );
 }
 
-function Leaderboard({ rows }: { rows: EventPayload['leaderboard'] }) {
+function Leaderboard({ state, final }: { state: TriviaState; final: boolean }) {
+  const { overall, categories } = state.leaderboard;
+  const winner = final ? overall.find((r) => r.points > 0) : undefined;
   return (
     <div className="leaderboard">
-      <h3>Live leaderboard</h3>
-      {rows.length === 0 ? <p className="note">No completed scores yet.</p> : rows.map((row, i) => (
-        <div className="leaderRow" key={`${row.display_name}-${row.completed_at}-${i}`}>
-          <span>{i + 1}. {row.display_name}</span>
-          <strong>{row.score}</strong>
+      {winner && (
+        <div className="winner">
+          <span>Overall winner</span>
+          <strong>🏆 {winner.name}</strong>
+          <span>{winner.points} points</span>
+        </div>
+      )}
+      <h3>{final ? 'Final standings' : 'Live leaderboard'}</h3>
+      {overall.length === 0 ? (
+        <p className="note">No answers yet.</p>
+      ) : overall.map((row, i) => (
+        <div className={row.isYou ? 'leaderRow you' : 'leaderRow'} key={`${row.name}-${i}`}>
+          <span>{i + 1}. {row.name}{row.isYou ? ' (you)' : ''}</span>
+          <strong>{row.points}</strong>
         </div>
       ))}
+      <h3 className="leaderSub">{final ? 'Category champions' : 'Category leaders'}</h3>
+      {categories.map((c) => (
+        <div className="leaderRow" key={c.key}>
+          <span>{c.label}</span>
+          <strong>{c.leader ? `${c.leader.name} • ${c.leader.points}` : '—'}</strong>
+        </div>
+      ))}
+      <p className="tiny">Ties go to whoever reached the score first.</p>
     </div>
   );
 }
