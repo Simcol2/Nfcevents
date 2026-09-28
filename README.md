@@ -470,6 +470,8 @@ The centerpiece app and future interactive wall can therefore use the **same eve
 
 # A Little Trouble: scenario mode
 
+> Chapman's own **A Little Trouble** no longer uses this — it runs the Truth or Dare crew game described in "One experience per guest, and the Trouble crew" below. This section is for a future event's `scenario` experience that isn't a Trouble-style crew game.
+
 `A Little Trouble` is now a reusable `scenario` experience rather than a simple dare prompt.
 
 Every scenario shows the rule:
@@ -533,6 +535,8 @@ They use Supabase Realtime just like competitions, so submitted plans and votes 
 
 # Guided scenario builder (the bank heist)
 
+> Same caveat as above: Chapman's Trouble no longer uses scenario prompts or this builder.
+
 A scenario prompt can carry a `builder` (JSON in `prompts.builder`). When it does, the
 group is walked through the plan step by step instead of getting one big text box:
 
@@ -571,34 +575,57 @@ experience automatically.
 `event_participants` is readable by the browser for the live crew lobby, so it stores
 a SHA-256 **hash** of the device token, never the token itself.
 
-## A Little Trouble crew
+## A Little Trouble: asynchronous Truth or Dare
 
-Experiences whose config has `trouble_roles` use the crew game:
+Experiences whose config has `trouble_roles` (with a `bio` per role, no mission prompt)
+use the crew game. There is **no host-configured mission and no host pre-approval** of
+individual dares: choosing to rent A Little Trouble is the opt-in, and if the host plays,
+they see their own role and dare at the same time as every other guest.
 
-1. **Lobby:** everyone who chose Trouble appears. Anyone can tap *Everyone's here, lock the crew*
-   once `trouble_min_crew` (default 2) people are in.
-2. **Voting:** the host's mission (`trouble_prompt_id`) appears. Each person votes who best fits
-   each role, themselves included. When everyone has voted, the server assigns one role per person
-   to maximise the crew's total votes. Exact ties resolve by search order.
-3. **Planning:** each person gets their role's prompt and one constraint, and types or dictates
-   (browser voice-to-text where supported) their part.
-4. **Review:** once every part is in, a plain combined plan is built in role order. Everyone approves.
-5. **Submitted** after the last approval. Editing a part during review resets approvals.
-6. **The funny version:** at that moment the server turns the approved plan into either a
-   **Breaking News** report or a **Police Incident Report** (chosen at random), quoting each
-   crew member's part. Every phone in the crew shows the same report to read aloud, with the
-   plain plan available underneath.
+1. **Lobby:** everyone who chose Trouble appears. Anyone can tap *Everyone's here, lock the
+   crew* once `trouble_min_crew` (default 2) people are in. Locking **freezes the member list**
+   in `trouble_session_members`, so a late join can never change the vote.
+2. **Role voting:** each person privately votes on who in the crew best fits each personality
+   role (The Sneak, The Smooth Talker, The Instigator, The Charmer, The Observer, The Actor,
+   The Social Engineer, The Wildcard). Self-voting is allowed. Individual votes are never sent
+   to the browser, only each guest's own votes and the aggregated counts — nobody can see who
+   voted for whom.
+3. **Reveal:** once everyone has voted, the server assigns one role per person to maximise the
+   crew's total votes (exact ties resolve by search order) and deals each person a **private
+   random dare** from that role's task pool. Roles reveal one at a time with vote counts.
+4. **Play, asynchronously.** Guests complete their dare whenever the moment comes up during the
+   event — dinner does not stop for this. Each dare has a `success_text` describing what counts.
+5. **Recruit or pass.** A player may ask **one** other Trouble player for backup: sending the
+   request is the requester's commitment, and the helper sees the dare and must explicitly
+   accept before either side sees the other's dare. Each player can be in only one alliance at
+   a time. Instead of the dare, a player may **pass**, which hands them a random Truth prompt;
+   their answer becomes visible to the whole Trouble crew.
+6. **Resolve:** each dare finishes as **I pulled it off** or **I got caught**, with an optional
+   one-line story. Once every player has finished, been caught, or answered a Truth, the session
+   auto-**wraps**.
+7. **The wrap-up:** the server builds `trouble_sessions.host_wrap_text`, a plain read-aloud
+   summary of who did what. There's no host account or renter email in this repo, so delivery
+   is a separate step: `POST /api/trouble/host-wrap` with header `x-host-wrap-key: HOST_WRAP_KEY`
+   (set that env var in Vercel) returns the text once the session has wrapped. Your booking/admin
+   system calls it after the event.
 
-Crew size is capped at the number of roles (6 for Chapman). Once the crew is locked, or when it is
-full, new guests are told to choose another experience instead of joining a game that cannot
-include them.
+The dare and Truth banks are database-driven (`trouble_dares`, `trouble_truths`), so adding or
+retiring prompts is a Supabase edit, not a redeploy. Crew size is capped at the number of roles
+(8 for Chapman). Once the crew is locked, or full, new guests are told to choose another
+experience instead of joining a game that cannot include them.
 
-To change the mission, set `experiences.config.trouble_prompt_id` to another Trouble prompt.
 Scenario experiences **without** `trouble_roles` still use the guided builder / free-text flow.
 
 ## Resetting before the real event
 
+Testing starts both clocks. Before the real event, run in the SQL Editor:
+
 ```sql
-delete from public.trouble_sessions;      -- also clears votes, roles and plan pieces
-delete from public.event_participants;    -- unlocks every guest's category choice
+-- Trivia: clears players, scores and in-progress questions.
+delete from public.trivia_attempts;
+delete from public.trivia_players;
+
+-- A Little Trouble: cascades to members, votes, roles, dares, truths, collabs.
+delete from public.trouble_sessions;
+delete from public.event_participants;   -- also unlocks every guest's category choice
 ```

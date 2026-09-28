@@ -176,3 +176,6 @@ button { touch-action: manipulation; }
 .crewReport { white-space: pre-wrap; font-size: 1rem; }
 .crewPlanDetails { margin-top: 16px; font-family: Arial, sans-serif; }
 .crewPlanDetails summary { cursor: pointer; color: var(--muted); padding: 8px 0; }
+
+/* Append to app/globals.css */
+.dareCard{margin:18px 0;padding:20px;border-radius:18px;background:#fff;border:1px solid rgba(65,50,35,.13);font:1.05rem/1.55 Arial,sans-serif}.roleReveal{display:grid;justify-items:center;gap:6px;margin:22px 0;padding:24px;border-radius:20px;background:color-mix(in srgb,var(--accent) 11%,white);font-family:Arial,sans-serif}.roleReveal strong{font-size:2rem}.roleReveal span{color:var(--muted);font-size:.9rem}.collabCard{margin-top:18px;padding:16px;border-radius:16px;background:color-mix(in srgb,var(--accent2) 8%,white);border:1px solid color-mix(in srgb,var(--accent2) 18%,transparent);font: .94rem/1.5 Arial,sans-serif}.collabCard p{margin:8px 0 0}.buttonRow{display:grid;grid-template-columns:1fr 1fr;gap:10px}.buttonRow .primary,.buttonRow .secondary{margin-top:14px}.truthButton{margin-top:10px}.crewPlanDetails{margin-top:22px}.crewPlanDetails summary{cursor:pointer;font:700 .95rem Arial,sans-serif;color:var(--muted)}

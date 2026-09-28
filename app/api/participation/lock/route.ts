@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-server';
-import { hashDeviceToken, isCrewExperience, parseRoles } from '@/lib/trouble';
+import { hashDeviceToken, isCrewExperience } from '@/lib/trouble';
+import { parseDareRoles } from '@/lib/trouble-dares';
 
 const PARTICIPANT_COLUMNS = 'id,event_id,experience_id,display_name,locked_at';
 
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
 
   // A crew game can only take people while its lobby is open and it has a role for them.
   if (isCrewExperience(experience.config)) {
-    const roles = parseRoles(experience.config ?? {});
+    const roles = parseDareRoles(experience.config ?? {});
     const [{ data: session }, { count }] = await Promise.all([
       supabase.from('trouble_sessions').select('status').eq('event_id', eventId).eq('experience_id', experienceId).maybeSingle(),
       supabase.from('event_participants').select('*', { count: 'exact', head: true }).eq('event_id', eventId).eq('experience_id', experienceId),
