@@ -40,9 +40,14 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
     ? await supabase.from('competition_entry_results').select('*').in('competition_id', competitionIds).order('votes', { ascending: false }).order('created_at', { ascending: true })
     : { data: [], error: null };
 
+  const scenarioEntriesRes = ids.length
+    ? await supabase.from('scenario_entry_results').select('*').in('experience_id', ids).order('votes', { ascending: false }).order('created_at', { ascending: true })
+    : { data: [], error: null };
+
   const prompts: Record<string, unknown[]> = {};
   const competitions: Record<string, unknown | null> = {};
   const competitionEntries: Record<string, unknown[]> = {};
+  const scenarioEntries: Record<string, unknown[]> = {};
 
   for (const exp of experiences ?? []) {
     prompts[exp.id] = (promptsRes.data ?? []).filter((p) => p.experience_id === exp.id);
@@ -51,6 +56,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
     competitionEntries[exp.id] = comp
       ? (entriesRes.data ?? []).filter((entry) => entry.competition_id === comp.id)
       : [];
+    scenarioEntries[exp.id] = (scenarioEntriesRes.data ?? []).filter((entry) => entry.experience_id === exp.id);
   }
 
   return NextResponse.json({
@@ -59,5 +65,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
     prompts,
     competitions,
     competitionEntries,
+    scenarioEntries,
   });
 }

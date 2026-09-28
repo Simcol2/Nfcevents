@@ -13,7 +13,7 @@ export type Experience = {
   key: string;
   title: string;
   description: string;
-  mode: 'prompt' | 'trivia' | 'competition';
+  mode: 'prompt' | 'trivia' | 'competition' | 'scenario';
   sort_order: number;
   config: Record<string, unknown>;
 };
@@ -85,6 +85,16 @@ export type CompetitionEntry = {
   votes: number;
 };
 
+export type ScenarioEntry = {
+  id: string;
+  experience_id: string;
+  prompt_id: string;
+  group_name: string | null;
+  plan: string;
+  created_at: string;
+  votes: number;
+};
+
 export type EventPayload = {
   event: {
     id: string;
@@ -98,4 +108,5 @@ export type EventPayload = {
   prompts: Record<string, Prompt[]>;
   competitions: Record<string, Competition | null>;
   competitionEntries: Record<string, CompetitionEntry[]>;
+  scenarioEntries: Record<string, ScenarioEntry[]>;
 };

@@ -94,3 +94,25 @@ button { touch-action: manipulation; }
 .winner { display: grid; justify-items: center; gap: 4px; margin-bottom: 18px; padding: 16px; border-radius: 16px; background: #fae9c8; text-align: center; }
 .winner strong { font-size: 1.4rem; }
 .winner span { color: #5c5046; font-size: .85rem; }
+
+.scenarioRule {
+  margin: 0 0 22px;
+  padding: 15px 16px;
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--accent2) 9%, var(--paper));
+  border: 1px solid color-mix(in srgb, var(--accent2) 18%, transparent);
+  font-family: Arial, sans-serif;
+}
+.scenarioRule strong {
+  display: block;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  font-size: .72rem;
+  color: var(--accent2);
+}
+.scenarioRule span {
+  display: block;
+  line-height: 1.45;
+  color: #51483f;
+}

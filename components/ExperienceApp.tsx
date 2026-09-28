@@ -9,6 +9,7 @@ import type {
   Experience,
   OpenedQuestion,
   Prompt,
+  ScenarioEntry,
   TriviaState,
 } from '@/lib/types';
 
@@ -53,6 +54,8 @@ export default function ExperienceApp({ slug }: { slug: string }) {
       .channel(`event-${data.event.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'competition_entries' }, () => void load())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'competition_votes' }, () => void load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'scenario_entries', filter: `event_id=eq.${data.event.id}` }, () => void load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'scenario_votes' }, () => void load())
       .subscribe();
 
     return () => {
@@ -148,6 +151,19 @@ function ExperienceScreen({
     );
   }
 
+  if (experience.mode === 'scenario') {
+    return (
+      <ScenarioExperience
+        eventId={data.event.id}
+        experience={experience}
+        scenarios={data.prompts[experience.id] ?? []}
+        entries={data.scenarioEntries[experience.id] ?? []}
+        refresh={refresh}
+        onBack={onBack}
+      />
+    );
+  }
+
   return (
     <PromptExperience
       experience={experience}
@@ -181,6 +197,185 @@ function PromptExperience({ experience, prompts, onBack }: { experience: Experie
           </>
         ) : (
           <p className="note">No prompts have been added for this experience yet.</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ScenarioExperience({
+  eventId,
+  experience,
+  scenarios,
+  entries,
+  refresh,
+  onBack,
+}: {
+  eventId: string;
+  experience: Experience;
+  scenarios: Prompt[];
+  entries: ScenarioEntry[];
+  refresh: () => Promise<void>;
+  onBack: () => void;
+}) {
+  const [index, setIndex] = useState(() => Math.floor(Math.random() * Math.max(scenarios.length, 1)));
+  const [groupName, setGroupName] = useState('');
+  const [plan, setPlan] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const scenario = scenarios[index] ?? null;
+
+  const config = experience.config ?? {};
+  const outcome = config.scenario_outcome === 'share' || config.scenario_outcome === 'vote'
+    ? config.scenario_outcome
+    : 'conversation';
+  const minimumEntries = typeof config.scenario_minimum_entries === 'number'
+    ? Math.max(2, config.scenario_minimum_entries)
+    : 3;
+  const instruction = typeof config.scenario_instruction === 'string'
+    ? config.scenario_instruction
+    : 'Use only skills someone in your group actually has.';
+  const shareMessage = typeof config.scenario_share_message === 'string'
+    ? config.scenario_share_message
+    : 'Your plan is saved for the host to share later.';
+  const voteMessage = typeof config.scenario_vote_message === 'string'
+    ? config.scenario_vote_message
+    : 'Voting opens once enough plans are submitted.';
+
+  const scenarioEntries = useMemo(
+    () => scenario ? entries.filter((entry) => entry.prompt_id === scenario.id) : [],
+    [entries, scenario?.id],
+  );
+  const votingOpen = outcome === 'vote' && scenarioEntries.length >= minimumEntries;
+  const sortedEntries = useMemo(
+    () => [...scenarioEntries].sort((a, b) => b.votes - a.votes || a.created_at.localeCompare(b.created_at)),
+    [scenarioEntries],
+  );
+
+  function another() {
+    if (scenarios.length <= 1) return;
+    let next = index;
+    while (next === index) next = Math.floor(Math.random() * scenarios.length);
+    setIndex(next);
+    setPlan('');
+    setGroupName('');
+    setMessage('');
+    setError('');
+  }
+
+  async function submitPlan() {
+    if (!scenario || !plan.trim() || outcome === 'conversation') return;
+    setBusy(true);
+    setMessage('');
+    setError('');
+    try {
+      const res = await fetch('/api/scenario/entry', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          eventId,
+          experienceId: experience.id,
+          promptId: scenario.id,
+          groupName,
+          plan,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Could not save your plan.');
+      setPlan('');
+      setGroupName('');
+      setMessage(outcome === 'vote' ? voteMessage : shareMessage);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not save your plan.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function vote(entryId: string) {
+    if (!scenario || !votingOpen) return;
+    setBusy(true);
+    setMessage('');
+    setError('');
+    try {
+      const res = await fetch('/api/scenario/vote', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          entryId,
+          experienceId: experience.id,
+          promptId: scenario.id,
+          deviceToken: getDeviceToken(),
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Could not record vote.');
+      setMessage('Vote recorded.');
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not record vote.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section>
+      <button className="back" onClick={onBack}>← Back to experiences</button>
+      <div className="panel">
+        <div className="category">{experience.title}</div>
+        {scenario ? (
+          <>
+            <div className="scenarioRule">
+              <strong>One rule</strong>
+              <span>{instruction}</span>
+            </div>
+            <p className="prompt">{scenario.body}</p>
+            {scenario.note && <p className="note">{scenario.note}</p>}
+
+            {outcome === 'conversation' ? (
+              <>
+                <div className="status">Talk it through together. Nothing to submit. The point is the conversation.</div>
+                {scenarios.length > 1 && <button className="secondary" onClick={another}>Give us another scenario</button>}
+              </>
+            ) : (
+              <>
+                <input className="textInput" maxLength={40} placeholder="Group or table name (optional)" value={groupName} onChange={(e) => setGroupName(e.target.value)} />
+                <textarea className="textArea" maxLength={1600} placeholder="What's your plan?" value={plan} onChange={(e) => setPlan(e.target.value)} />
+                <button className="primary" disabled={busy || !plan.trim()} onClick={submitPlan}>{busy ? 'Saving…' : 'Submit our plan'}</button>
+
+                {outcome === 'share' && <div className="status">Plans are saved so the host can decide whether to read them aloud later.</div>}
+                {outcome === 'vote' && (
+                  <div className="status">
+                    {votingOpen
+                      ? `${scenarioEntries.length} plans are in. Voting is open.`
+                      : `${scenarioEntries.length} ${scenarioEntries.length === 1 ? 'plan' : 'plans'} in. Voting opens after ${Math.max(0, minimumEntries - scenarioEntries.length)} more.`}
+                  </div>
+                )}
+
+                {message && <div className="status">{message}</div>}
+                {error && <div className="error">{error}</div>}
+
+                {sortedEntries.map((entry) => (
+                  <div className="entry" key={entry.id}>
+                    <div className="entryText">{entry.plan}</div>
+                    {entry.group_name && <div className="tiny" style={{ textAlign: 'left', marginTop: 8 }}>Submitted by {entry.group_name}</div>}
+                    {votingOpen && (
+                      <button className="voteBtn" disabled={busy} onClick={() => vote(entry.id)}>
+                        Vote for this plan • {entry.votes} {entry.votes === 1 ? 'vote' : 'votes'}
+                      </button>
+                    )}
+                  </div>
+                ))}
+
+                {scenarios.length > 1 && <button className="secondary" onClick={another}>Try another scenario</button>}
+              </>
+            )}
+          </>
+        ) : (
+          <p className="note">No scenarios have been added for this experience yet.</p>
         )}
       </div>
     </section>

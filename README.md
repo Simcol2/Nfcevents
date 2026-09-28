@@ -36,7 +36,7 @@ The event seed includes:
 - A Little Boost
 - A Little Trouble
 
-Each pulls a random prompt from the database.
+Holiday Fun and Boost pull random prompts from the database. **A Little Trouble now uses scenario mode:** the group receives an absurd scenario and must solve it using only skills genuinely available among the people playing. The host decides whether scenarios are conversation-only, saved for later read-aloud, or submitted for voting.
 
 ### Jeopardy-style trivia board
 A Little Challenge works like a Jeopardy board:
@@ -76,6 +76,8 @@ migrations/002_chapman_thanksgiving.sql
 migrations/004_view_security_invoker.sql
 migrations/005_board_trivia.sql
 migrations/006_chapman_board_trivia.sql
+migrations/007_scenario_mode.sql
+migrations/008_chapman_trouble_scenarios.sql
 ```
 
 (`003_event_template.sql` is a template for new events, not part of the Chapman setup.)
@@ -263,7 +265,8 @@ General Knowledge, 5th Grade and 9th Grade. Each has 1, 2 and 5 point questions.
 **Chapman Family Stats are placeholders.** Replace them before the dinner (see "Editing trivia questions").
 
 ### A Little Trouble
-Low-stakes dares.
+Scenario mode: absurd scenarios the group solves using only skills people at the table genuinely have.
+See "A Little Trouble: scenario mode" below.
 
 ### A Little Competition
 A shared text competition called:
@@ -303,9 +306,11 @@ The browser subscribes to changes in:
 ```text
 competition_entries
 competition_votes
+scenario_entries
+scenario_votes
 ```
 
-When another guest submits an entry or vote, open event pages reload the current shared event data.
+When another guest submits an entry, plan or vote, open event pages reload the current shared event data.
 The trivia board refreshes its leaderboard every 15 seconds instead, because trivia tables are
 deliberately not readable from the browser.
 
@@ -456,3 +461,66 @@ The database structure is deliberately ready to grow into the wall concept later
 - moderation/approval for public photo entries
 
 The centerpiece app and future interactive wall can therefore use the **same event backend**, rather than becoming two unrelated systems.
+
+---
+
+# A Little Trouble: scenario mode
+
+`A Little Trouble` is now a reusable `scenario` experience rather than a simple dare prompt.
+
+Every scenario shows the rule:
+
+> **Use only skills someone in your group actually has.**
+
+For Chapman the fuller instruction is:
+
+> Use only skills someone in your group actually has. If nobody at the table can drive, you do not have a getaway driver.
+
+The scenarios themselves are still stored in `public.prompts`, so adding or changing them does not require a frontend deployment.
+
+## Host controls the format
+
+Set `experiences.config.scenario_outcome` to one of:
+
+```text
+conversation
+share
+vote
+```
+
+### `conversation`
+
+The scenario exists only to get the table talking. Nothing is submitted and there is no winner.
+
+### `share`
+
+Groups can submit their plan. Everyone shares the same Supabase state, and the host can choose to read plans aloud later.
+
+### `vote`
+
+Groups submit plans. Voting opens after `scenario_minimum_entries` submissions for that scenario (enforced on the server). Each device gets one vote per scenario.
+
+Example configuration:
+
+```sql
+update public.experiences
+set config = jsonb_build_object(
+  'scenario_outcome', 'vote',
+  'scenario_minimum_entries', 3,
+  'scenario_instruction', 'Use only skills someone in your group actually has. If nobody can drive, you do not have a getaway driver.',
+  'scenario_share_message', 'Your plan is saved. The host can read the plans aloud later.',
+  'scenario_vote_message', 'Once enough plans are in, everyone can vote for the best one.'
+)
+where event_id = (select id from public.events where slug = 'chapman-thanksgiving-2026')
+  and key = 'trouble';
+```
+
+The new shared tables are:
+
+```text
+scenario_entries
+scenario_votes
+scenario_entry_results
+```
+
+They use Supabase Realtime just like competitions, so submitted plans and votes update across guests' phones.

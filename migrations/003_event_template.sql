@@ -59,3 +59,17 @@ begin
   values
     (v_competition_exp, 'Example Competition', 'Submit your entry. Voting opens once three entries are in.', 'text', 3, true, 1);
 end $$;
+
+
+-- SCENARIO MODE EXAMPLE
+-- Change an experience to mode='scenario' and configure how the host wants it played:
+-- update public.experiences
+-- set mode = 'scenario',
+--     config = jsonb_build_object(
+--       'scenario_outcome', 'conversation', -- conversation | share | vote
+--       'scenario_minimum_entries', 3,
+--       'scenario_instruction', 'Use only skills someone in your group actually has.',
+--       'scenario_share_message', 'The host can read the plans aloud later.',
+--       'scenario_vote_message', 'Voting opens after enough plans are submitted.'
+--     )
+-- where event_id = v_event and key = 'trouble';
