@@ -68,6 +68,7 @@ Run these files **in order**:
 ```text
 migrations/001_schema.sql
 migrations/002_chapman_thanksgiving.sql
+migrations/004_view_security_invoker.sql
 ```
 
 `001_schema.sql` creates:
